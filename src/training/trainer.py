@@ -9,13 +9,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from .utils import calculate_accuracy
+from .utils import calculate_accuracy, EarlyStopping
 import os
 
 
 class Trainer:
     """模型训练器"""
-    
+
     def __init__(
         self,
         model,
@@ -24,11 +24,14 @@ class Trainer:
         optimizer,
         criterion,
         device,
-        save_dir="checkpoints"
+        save_dir="checkpoints",
+        max_grad_norm=1.0,
+        early_stopping=None,
+        scheduler=None
     ):
         """
         初始化训练器
-        
+
         Args:
             model: 要训练的模型
             train_loader: 训练数据加载器
@@ -37,6 +40,9 @@ class Trainer:
             criterion: 损失函数
             device: 设备
             save_dir: 模型保存目录
+            max_grad_norm: 梯度裁剪最大范数（防梯度爆炸）
+            early_stopping: EarlyStopping 实例（可选）
+            scheduler: 学习率调度器（可选）
         """
         self.model = model
         self.train_loader = train_loader
@@ -45,6 +51,9 @@ class Trainer:
         self.criterion = criterion
         self.device = device
         self.save_dir = save_dir
+        self.max_grad_norm = max_grad_norm
+        self.early_stopping = early_stopping
+        self.scheduler = scheduler
         
         # 创建保存目录
         os.makedirs(save_dir, exist_ok=True)
@@ -78,6 +87,9 @@ class Trainer:
             
             # 反向传播
             loss.backward()
+            # 梯度裁剪（防 Transformer 梯度爆炸）
+            if self.max_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.optimizer.step()
             
             # 计算指标
@@ -128,43 +140,57 @@ class Trainer:
     def train(self, num_epochs, save_best=True):
         """
         训练模型
-        
+
         Args:
             num_epochs: 训练轮数
             save_best: 是否保存最佳模型
         """
         best_val_accuracy = 0
-        
+
         print(f"开始训练，共{num_epochs}个epoch")
         print("-" * 50)
-        
+
         for epoch in range(num_epochs):
             print(f"Epoch {epoch + 1}/{num_epochs}")
-            
+
             # 训练
             train_loss, train_acc = self.train_epoch()
-            
+
             # 验证
             val_loss, val_acc = self.validate()
-            
+
             # 记录历史
             self.train_losses.append(train_loss)
             self.train_accuracies.append(train_acc)
             self.val_losses.append(val_loss)
             self.val_accuracies.append(val_acc)
-            
+
             # 打印结果
             print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
             print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-            
+
             # 保存最佳模型
             if save_best and val_acc > best_val_accuracy:
                 best_val_accuracy = val_acc
                 self.save_model(f"best_model.pth")
                 print(f"保存最佳模型 (验证准确率: {val_acc:.4f})")
-            
+
+            # 学习率调度
+            if self.scheduler is not None:
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
+
+            # 早停检查
+            if self.early_stopping is not None:
+                should_stop = self.early_stopping(val_loss, self.model)
+                if should_stop:
+                    print(f"早停触发！在第 {epoch + 1} 个 epoch 停止训练")
+                    break
+
             print("-" * 50)
-        
+
         print(f"训练完成！最佳验证准确率: {best_val_accuracy:.4f}")
     
     def save_model(self, filename):
@@ -192,7 +218,7 @@ class Trainer:
             filename: 文件名
         """
         filepath = os.path.join(self.save_dir, filename)
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=True)
         
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

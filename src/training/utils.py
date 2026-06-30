@@ -163,5 +163,5 @@ class EarlyStopping:
         return False
     
     def save_checkpoint(self, model):
-        """保存最佳权重"""
-        self.best_weights = model.state_dict().copy() 
+        """保存最佳权重（深拷贝，避免引用共享）"""
+        self.best_weights = {k: v.clone() for k, v in model.state_dict().items()} 

@@ -162,9 +162,7 @@ class SimpleTransformer(nn.Module):
         
         # 词嵌入 + 位置编码
         x = self.embedding(x) * (self.d_model ** 0.5)  # 缩放嵌入
-        x = x.transpose(0, 1)  # [seq_len, batch_size, d_model]
-        x = self.pos_encoding(x)
-        x = x.transpose(0, 1)  # [batch_size, seq_len, d_model]
+        x = self.pos_encoding(x)  # batch_first，无需转置
         x = self.dropout(x)
         
         # 通过Transformer层

@@ -125,17 +125,17 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         
-        pe = pe.unsqueeze(0).transpose(0, 1)
+        pe = pe.unsqueeze(0)  # [1, max_len, d_model]，batch_first 风格
         self.register_buffer('pe', pe)
-        
+
     def forward(self, x):
         """
         添加位置编码到输入
-        
+
         Args:
-            x: 输入张量 [seq_len, batch_size, d_model]
-            
+            x: 输入张量 [batch_size, seq_len, d_model]
+
         Returns:
             带位置编码的输出
         """
-        return x + self.pe[:x.size(0), :] 
+        return x + self.pe[:, :x.size(1), :] 
